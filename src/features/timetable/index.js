@@ -1,0 +1,1 @@
+export { default as TimetableDashboard } from './timetable-dashboard';
