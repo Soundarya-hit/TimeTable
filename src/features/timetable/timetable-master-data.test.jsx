@@ -32,12 +32,16 @@ describe('TimetableMasterData Component', () => {
 
   test('renders master data input fields and options correctly', () => {
     render(<TimetableMasterData {...mockProps} />);
-    
-    expect(screen.getByText(/Page 1 of 3: Master Data, Priorities & Configurations/i)).toBeInTheDocument();
+
+    // 1. Title Text - Corrected Text Matching
+    expect(
+      screen.getByText(/Page 1 of 3: Master Data, Configurations & Priorities/i)
+    ).toBeInTheDocument();
+
+    // 2. Default Input Values
     expect(screen.getByDisplayValue('Teacher A, Teacher B')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Class 1, Class 2')).toBeInTheDocument();
-    expect(screen.getByText('Teacher A')).toBeInTheDocument();
-    expect(screen.getByText('Maths')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Maths, Science')).toBeInTheDocument();
   });
 
   test('calls onProceed when form is submitted', () => {

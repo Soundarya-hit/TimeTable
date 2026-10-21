@@ -9,11 +9,13 @@ export function TimetableMasterData({
   teacherTypes, setTeacherTypes,
   teacherFreeCounts, setTeacherFreeCounts,
   subjectPriorities, setSubjectPriorities,
+  generationMode,
+  subjectPeriodCounts, setSubjectPeriodCounts,
   onProceed, styles
 }) {
   return (
     <form onSubmit={onProceed} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <div style={styles.stepIndicator}>Page 1 of 3: Master Data, Priorities & Configurations</div>
+      <div style={styles.stepIndicator}>Page 1 of 3: Master Data, Configurations & {generationMode === 'period' ? 'Period Counts' : 'Priorities'}</div>
       
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '15px' }}>
         <div>
@@ -73,25 +75,48 @@ export function TimetableMasterData({
         </div>
       </div>
 
-      <div style={styles.assignmentBox}>
-        <h3 style={{ fontSize: '14px', color: '#1e293b', margin: '0 0 10px 0' }}>📚 Subject Priorities (High / Medium / Low)</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
-          {subjects.map(sub => (
-            <div key={sub} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: '#334155' }}>{sub}</span>
-              <select
-                value={subjectPriorities[sub] !== undefined ? subjectPriorities[sub] : 2}
-                onChange={(e) => setSubjectPriorities({ ...subjectPriorities, [sub]: Number(e.target.value) })}
-                style={{ ...styles.selectInput, fontSize: '12px', padding: '4px 8px' }}
-              >
-                <option value={3}>High Priority</option>
-                <option value={2}>Medium Priority</option>
-                <option value={1}>Low Priority</option>
-              </select>
-            </div>
-          ))}
+      {/* Conditionally render Priorities UI or Period Count Target UI based on selected Mode */}
+      {generationMode === 'period' ? (
+        <div style={styles.assignmentBox}>
+          <h3 style={{ fontSize: '14px', color: '#1e293b', margin: '0 0 5px 0' }}>📅 Weekly Period Counts (Strict Count per Class)</h3>
+          <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 10px 0' }}>Specify how many times each subject should appear per week for every class.</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
+            {subjects.map(sub => (
+              <div key={sub} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#334155' }}>{sub}</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="15"
+                  value={subjectPeriodCounts[sub] !== undefined ? subjectPeriodCounts[sub] : 5}
+                  onChange={(e) => setSubjectPeriodCounts({ ...subjectPeriodCounts, [sub]: Number(e.target.value) })}
+                  style={{ ...styles.textInput, width: '70px', padding: '4px 8px', textAlign: 'center', fontSize: '12px' }}
+                />
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div style={styles.assignmentBox}>
+          <h3 style={{ fontSize: '14px', color: '#1e293b', margin: '0 0 10px 0' }}>📚 Subject Priorities (High / Medium / Low)</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
+            {subjects.map(sub => (
+              <div key={sub} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#334155' }}>{sub}</span>
+                <select
+                  value={subjectPriorities[sub] !== undefined ? subjectPriorities[sub] : 2}
+                  onChange={(e) => setSubjectPriorities({ ...subjectPriorities, [sub]: Number(e.target.value) })}
+                  style={{ ...styles.selectInput, fontSize: '12px', padding: '4px 8px' }}
+                >
+                  <option value={3}>High Priority</option>
+                  <option value={2}>Medium Priority</option>
+                  <option value5={1}>Low Priority</option>
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <button type="submit" style={styles.primaryButton}>Next: Teacher Subject Assignments ➔</button>
     </form>

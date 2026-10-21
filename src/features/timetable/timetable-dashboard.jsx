@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { generateTimetableData, DAYS_LIST } from './timetable-generator';
+import { generatePeriodTimetableData } from './timetable-generator-period';
 import { TimetableMasterData } from './timetable-master-data';
 import { TimetableAssignments } from './timetable-assignments';
 import { TimetableView } from './timetable-view';
@@ -9,6 +10,10 @@ export default function TimetableDashboard({ onBack }) {
   const [mainViewTab, setMainViewTab] = useState('class');
   const [errorMessage, setErrorMessage] = useState('');
   const [optimizationNotice, setOptimizationNotice] = useState(null);
+  
+  // New State for Timetable Mode Selection
+  const [generationMode, setGenerationMode] = useState('priority'); // 'priority' or 'period'
+  
   const [teachersInput, setTeachersInput] = useState('Teacher A, Teacher B, Teacher C, Teacher D, Teacher E, Teacher F');
   const [classesInput, setClassesInput] = useState('Class 1, Class 2, Class 3, Class 4, Class 5');
   const [subjectsInput, setSubjectsInput] = useState('Maths, Science, English, Tamil, Social');
@@ -16,6 +21,11 @@ export default function TimetableDashboard({ onBack }) {
   
   const [subjectPriorities, setSubjectPriorities] = useState({
     Maths: 3, Science: 3, English: 2, Tamil: 2, Social: 1
+  });
+
+  // New State for Period Counts per Week (Used in Period-Based Mode)
+  const [subjectPeriodCounts, setSubjectPeriodCounts] = useState({
+    Maths: 5, Science: 5, English: 4, Tamil: 4, Social: 3
   });
   
   const [teacherTypes, setTeacherTypes] = useState({});
@@ -52,10 +62,13 @@ export default function TimetableDashboard({ onBack }) {
     if (tList.length > 0 && !activeViewTeacher) setActiveViewTeacher(tList[0]);
     
     const newPriorities = { ...subjectPriorities };
+    const newPeriodCounts = { ...subjectPeriodCounts };
     sList.forEach(sub => {
       if (newPriorities[sub] === undefined) newPriorities[sub] = 2;
+      if (newPeriodCounts[sub] === undefined) newPeriodCounts[sub] = 5;
     });
     setSubjectPriorities(newPriorities);
+    setSubjectPeriodCounts(newPeriodCounts);
 
     const updatedTypes = { ...teacherTypes };
     const updatedFreeCounts = { ...teacherFreeCounts };
@@ -131,11 +144,28 @@ export default function TimetableDashboard({ onBack }) {
       return;
     }
 
-    const { classTimetables: cData, teacherTimetables: tData, unassignedSlotsCount } = generateTimetableData({
-      teachersInput, classesInput, subjectsInput, periodsPerDay,
-      subjectPriorities, teacherTypes, teacherFreeCounts,
-      teacherAvailability, assignments
-    });
+    let cData, tData, unassignedSlotsCount;
+
+    // Check Generation Mode and call respective generator algorithm
+    if (generationMode === 'period') {
+      const result = generatePeriodTimetableData({
+        teachersInput, classesInput, subjectsInput, periodsPerDay,
+        subjectPeriodCounts, teacherTypes, teacherFreeCounts,
+        teacherAvailability, assignments
+      });
+      cData = result.classTimetables;
+      tData = result.teacherTimetables;
+      unassignedSlotsCount = result.unassignedSlotsCount;
+    } else {
+      const result = generateTimetableData({
+        teachersInput, classesInput, subjectsInput, periodsPerDay,
+        subjectPriorities, teacherTypes, teacherFreeCounts,
+        teacherAvailability, assignments
+      });
+      cData = result.classTimetables;
+      tData = result.teacherTimetables;
+      unassignedSlotsCount = result.unassignedSlotsCount;
+    }
 
     setClassTimetables(cData);
     setTeacherTimetables(tData);
@@ -143,7 +173,7 @@ export default function TimetableDashboard({ onBack }) {
     if (unassignedSlotsCount > 0) {
       setOptimizationNotice({
         type: 'warning',
-        message: `Timetable generated successfully. Note: ${unassignedSlotsCount} slots required fallback allocation due to strict constraints.`
+        message: `Timetable generated successfully using ${generationMode.toUpperCase()} mode. Note: ${unassignedSlotsCount} slots required fallback allocation due to constraints.`
       });
     }
 
@@ -223,6 +253,35 @@ export default function TimetableDashboard({ onBack }) {
         )}
       </div>
 
+      {/* Mode Selection UI Header */}
+      <div style={{ backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '15px', marginBottom: '20px' }}>
+        <label style={{ ...styles.label, marginBottom: '8px', color: '#1e293b', fontWeight: 'bold' }}>
+          Select Generation Algorithm Mode:
+        </label>
+        <div style={{ display: 'flex', gap: '15px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}>
+            <input 
+              type="radio" 
+              name="generationMode" 
+              value="priority" 
+              checked={generationMode === 'priority'} 
+              onChange={() => setGenerationMode('priority')} 
+            />
+            Priority Base Mode (Standard Distribution)
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}>
+            <input 
+              type="radio" 
+              name="generationMode" 
+              value="period" 
+              checked={generationMode === 'period'} 
+              onChange={() => setGenerationMode('period')} 
+            />
+            Period Base Mode (Strict Weekly Count)
+          </label>
+        </div>
+      </div>
+
       {errorMessage && (
         <div style={styles.errorBanner}>
           ⚠️ <strong>Validation Error:</strong> {errorMessage}
@@ -245,6 +304,8 @@ export default function TimetableDashboard({ onBack }) {
           teacherTypes={teacherTypes} setTeacherTypes={setTeacherTypes}
           teacherFreeCounts={teacherFreeCounts} setTeacherFreeCounts={setTeacherFreeCounts}
           subjectPriorities={subjectPriorities} setSubjectPriorities={setSubjectPriorities}
+          generationMode={generationMode}
+          subjectPeriodCounts={subjectPeriodCounts} setSubjectPeriodCounts={setSubjectPeriodCounts}
           onProceed={handleProceedToPage2}
           styles={styles}
         />
