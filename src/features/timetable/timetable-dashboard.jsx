@@ -267,7 +267,7 @@ export default function TimetableDashboard({ onBack }) {
               checked={generationMode === 'priority'} 
               onChange={() => setGenerationMode('priority')} 
             />
-            Priority Base Mode (Standard Distribution)
+            Priority Base Mode 
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}>
             <input 
@@ -277,7 +277,7 @@ export default function TimetableDashboard({ onBack }) {
               checked={generationMode === 'period'} 
               onChange={() => setGenerationMode('period')} 
             />
-            Period Base Mode (Strict Weekly Count)
+            Period Base Mode 
           </label>
         </div>
       </div>
