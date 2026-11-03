@@ -47,7 +47,8 @@ describe('TimetableMasterData Component', () => {
   test('calls onProceed when form is submitted', () => {
     render(<TimetableMasterData {...mockProps} />);
     
-    const submitButton = screen.getByRole('button', { name: /Next: Teacher Subject Assignments/i });
+    // Updated button name to match "Next: Advanced Scheduling Rules"
+    const submitButton = screen.getByRole('button', { name: /Next: Advanced Scheduling Rules/i });
     fireEvent.click(submitButton);
     
     expect(mockProps.onProceed).toHaveBeenCalled();
