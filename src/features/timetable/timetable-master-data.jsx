@@ -259,8 +259,7 @@ export function TimetableMasterData({
                   style={{ ...styles.selectInput, fontSize: '12px', flex: 1 }}
                 >
                   <option value="Full-Time">Full-Time</option>
-                  <option value="Part-Time First Half">Part-Time First Half</option>
-                  <option value="Part-Time Second Half">Part-Time Second Half</option>
+                  <option value="Part-Time">Part-Time</option>
                 </select>
                 <select
                   value={teacherFreeCounts[t] !== undefined ? teacherFreeCounts[t] : 1}
@@ -321,7 +320,7 @@ export function TimetableMasterData({
         </div>
       )}
 
-      <button type="submit" style={styles.primaryButton}>Next: Teacher Subject Assignments ➔</button>
+      <button type="submit" style={styles.primaryButton}>Next: Advanced Scheduling Rules ➔</button>
     </form>
   );
 }

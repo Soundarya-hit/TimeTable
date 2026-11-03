@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { generateTimetableData, DAYS_LIST } from './timetable-generator';
 import { generatePeriodTimetableData } from './timetable-generator-period';
 import { TimetableMasterData } from './timetable-master-data';
+import { TimetableAdvancedConstraints } from './timetable-advanced-constraints';
 import { TimetableAssignments } from './timetable-assignments';
 import { TimetableView } from './timetable-view';
 
@@ -27,6 +28,12 @@ export default function TimetableDashboard({ onBack }) {
   const [subjectPeriodCounts, setSubjectPeriodCounts] = useState({
     Maths: 5, Science: 5, English: 4, Tamil: 4, Social: 3
   });
+
+  // Advanced Constraints States (Page 1.5)
+  const [teacherCategory, setTeacherCategory] = useState({});
+  const [teacherSpecificFreeSlots, setTeacherSpecificFreeSlots] = useState({});
+  const [partTimeDayConfig, setPartTimeDayConfig] = useState({});
+  const [subjectTimeSlotRules, setSubjectTimeSlotRules] = useState({});
   
   const [teacherTypes, setTeacherTypes] = useState({});
   const [teacherFreeCounts, setTeacherFreeCounts] = useState({});
@@ -73,6 +80,7 @@ export default function TimetableDashboard({ onBack }) {
     const updatedTypes = { ...teacherTypes };
     const updatedFreeCounts = { ...teacherFreeCounts };
     tList.forEach(t => {
+      // FIXED: Preserves user selections instead of forcefully overwriting with Full-Time
       if (!updatedTypes[t]) updatedTypes[t] = 'Full-Time';
       if (updatedFreeCounts[t] === undefined) updatedFreeCounts[t] = 1;
     });
@@ -80,7 +88,7 @@ export default function TimetableDashboard({ onBack }) {
     setTeacherFreeCounts(updatedFreeCounts);
   }, [teachersInput, classesInput, subjectsInput]);
 
-  const handleProceedToPage2 = (e) => {
+  const handleProceedToPage1_5 = (e) => {
     e.preventDefault();
     const tList = teachersInput.split(',').map(t => t.trim()).filter(Boolean);
     const cList = classesInput.split(',').map(c => c.trim()).filter(Boolean);
@@ -89,6 +97,11 @@ export default function TimetableDashboard({ onBack }) {
       setErrorMessage('Please provide valid comma-separated lists for Teachers, Classes, and Subjects.');
       return;
     }
+    setErrorMessage('');
+    setStep('page1_5');
+  };
+
+  const handleProceedToPage2 = () => {
     setErrorMessage('');
     setStep('page2');
   };
@@ -146,12 +159,13 @@ export default function TimetableDashboard({ onBack }) {
 
     let cData, tData, unassignedSlotsCount;
 
-    // Check Generation Mode and call respective generator algorithm
+    // Check Generation Mode and call respective generator algorithm with Advanced Constraints
     if (generationMode === 'period') {
       const result = generatePeriodTimetableData({
         teachersInput, classesInput, subjectsInput, periodsPerDay,
         subjectPeriodCounts, teacherTypes, teacherFreeCounts,
-        teacherAvailability, assignments
+        teacherAvailability, assignments,
+        teacherCategory, teacherSpecificFreeSlots, partTimeDayConfig, subjectTimeSlotRules
       });
       cData = result.classTimetables;
       tData = result.teacherTimetables;
@@ -160,7 +174,8 @@ export default function TimetableDashboard({ onBack }) {
       const result = generateTimetableData({
         teachersInput, classesInput, subjectsInput, periodsPerDay,
         subjectPriorities, teacherTypes, teacherFreeCounts,
-        teacherAvailability, assignments
+        teacherAvailability, assignments,
+        teacherCategory, teacherSpecificFreeSlots, partTimeDayConfig, subjectTimeSlotRules
       });
       cData = result.classTimetables;
       tData = result.teacherTimetables;
@@ -306,6 +321,24 @@ export default function TimetableDashboard({ onBack }) {
           subjectPriorities={subjectPriorities} setSubjectPriorities={setSubjectPriorities}
           generationMode={generationMode}
           subjectPeriodCounts={subjectPeriodCounts} setSubjectPeriodCounts={setSubjectPeriodCounts}
+          onProceed={handleProceedToPage1_5}
+          styles={styles}
+        />
+      )}
+
+      {step === 'page1_5' && (
+        <TimetableAdvancedConstraints
+          teachers={teachers} classes={classes} subjects={subjects}
+          periodsPerDay={periodsPerDay}
+          subjectPriorities={subjectPriorities}
+          subjectPeriodCounts={subjectPeriodCounts}
+          generationMode={generationMode}
+          teacherCategory={teacherCategory} setTeacherCategory={setTeacherCategory}
+          teacherSpecificFreeSlots={teacherSpecificFreeSlots} setTeacherSpecificFreeSlots={setTeacherSpecificFreeSlots}
+          partTimeDayConfig={partTimeDayConfig} setPartTimeDayConfig={setPartTimeDayConfig}
+          subjectTimeSlotRules={subjectTimeSlotRules} setSubjectTimeSlotRules={setSubjectTimeSlotRules}
+          teacherTypes={teacherTypes}
+          onBack={() => setStep('page1')}
           onProceed={handleProceedToPage2}
           styles={styles}
         />
@@ -321,7 +354,7 @@ export default function TimetableDashboard({ onBack }) {
           helpPeriodsPerDay={helpPeriodsPerDay} setHelpPeriodsPerDay={setHelpPeriodsPerDay}
           helpFreePeriodCount={helpFreePeriodCount} setHelpFreePeriodCount={setHelpFreePeriodCount}
           helpAssignedClassesCount={helpAssignedClassesCount} setHelpAssignedClassesCount={setHelpAssignedClassesCount}
-          onBack={() => setStep('page1')}
+          onBack={() => setStep('page1_5')}
           onGenerate={handleProceedToPage3}
           styles={styles}
         />

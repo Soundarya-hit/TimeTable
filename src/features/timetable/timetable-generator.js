@@ -1,268 +1,1139 @@
-// Pure JS logic for Timetable Generation Algorithms & Helpers
+// Timetable generation logic.
+// All class and teacher timetables are written together so that they can never
+// disagree about a teacher's assignment to a period.
 
-export const DAYS_LIST = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+export const DAYS_LIST = [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday'
+];
 
 export const generateTimetableData = ({
-  teachersInput,
-  classesInput,
-  subjectsInput,
+  teachersInput = '',
+  classesInput = '',
+  subjectsInput = '',
   periodsPerDay,
-  subjectPriorities,
-  teacherTypes,
-  teacherFreeCounts,
-  teacherAvailability,
-  assignments
+  subjectPriorities = {},
+  teacherTypes = {},
+  teacherFreeCounts = {},
+  teacherAvailability = {},
+  assignments = {},
+  teacherCategory = {},
+  teacherSpecificFreeSlots = {},
+  partTimeDayConfig = {},
+  subjectTimeSlotRules = {}
 }) => {
-  const tList = teachersInput.split(',').map(t => t.trim()).filter(Boolean);
-  const cList = classesInput.split(',').map(c => c.trim()).filter(Boolean);
-  const sList = subjectsInput.split(',').map(s => s.trim()).filter(Boolean);
 
-  const cTimetables = {};
-  cList.forEach(c => {
-    cTimetables[c] = {};
-    DAYS_LIST.forEach(d => {
-      cTimetables[c][d] = Array(periodsPerDay).fill(null);
-    });
-  });
+  const tList = splitInput(teachersInput);
+  const cList = splitInput(classesInput);
+  const sList = splitInput(subjectsInput);
+  const periodCount = Math.floor(Number(periodsPerDay));
 
-  const tTimetables = {};
-  tList.forEach(t => {
-    tTimetables[t] = {};
-    DAYS_LIST.forEach(d => {
-      tTimetables[t][d] = Array(periodsPerDay).fill(null);
-    });
-  });
+  if (!tList.length || !cList.length || !sList.length) {
+    throw new Error(
+      'Please enter at least one teacher, class, and subject.'
+    );
+  }
 
+  if (!Number.isFinite(periodCount) || periodCount < 1) {
+    throw new Error('Periods per day must be a positive number.');
+  }
+
+  // --------------------------------------------------
+  // 1. INITIALIZE CLASS TIMETABLES
+  // --------------------------------------------------
+
+  const cTimetables = Object.fromEntries(
+    cList.map(c => [
+      c,
+      Object.fromEntries(
+        DAYS_LIST.map(d => [d, Array(periodCount).fill(null)])
+      )
+    ])
+  );
+
+  // --------------------------------------------------
+  // 2. INITIALIZE TEACHER TIMETABLES
+  // --------------------------------------------------
+
+  const tTimetables = Object.fromEntries(
+    tList.map(t => [
+      t,
+      Object.fromEntries(
+        DAYS_LIST.map(d => [d, Array(periodCount).fill(null)])
+      )
+    ])
+  );
+
+  const halfLimit = Math.floor(periodCount / 2);
   const teacherOffSlots = {};
-  const halfLimit = Math.floor(periodsPerDay / 2);
+
+  // --------------------------------------------------
+  // 3. TEACHER FREE SLOT GENERATION
+  // --------------------------------------------------
 
   tList.forEach((teacher, tIdx) => {
+
     teacherOffSlots[teacher] = {};
+
     const tType = teacherTypes[teacher] || 'Full-Time';
-    const userFreeCount = teacherFreeCounts[teacher] !== undefined ? Number(teacherFreeCounts[teacher]) : 1;
 
-    DAYS_LIST.forEach((dayName, dIdx) => {
-      teacherOffSlots[teacher][dayName] = new Set();
-      let unavailableSet = new Set();
+    const freeCountValue = Number(teacherFreeCounts[teacher]);
 
-      if (tType === 'Part-Time First Half') {
-        for (let p = halfLimit; p < periodsPerDay; p++) {
-          unavailableSet.add(p);
+    const userFreeCount = Number.isFinite(freeCountValue)
+      ? Math.max(0, Math.floor(freeCountValue))
+      : 1;
+
+    const tCat = teacherCategory[teacher] || 'UG Only';
+
+    DAYS_LIST.forEach((day, dIdx) => {
+
+      const unavailable = new Set();
+
+      const dayShift = partTimeDayConfig[teacher]?.[day];
+
+      // Part-Time / First Half / Second Half / Off Day
+
+      if (
+        dayShift === 'First Half' ||
+        (tType === 'Part-Time' && !dayShift)
+      ) {
+        for (let p = halfLimit; p < periodCount; p++) {
+          unavailable.add(p);
         }
-      } else if (tType === 'Part-Time Second Half') {
+
+      } else if (dayShift === 'Second Half') {
+
         for (let p = 0; p < halfLimit; p++) {
-          unavailableSet.add(p);
+          unavailable.add(p);
+        }
+
+      } else if (dayShift === 'Off Day') {
+
+        for (let p = 0; p < periodCount; p++) {
+          unavailable.add(p);
         }
       }
 
-      let availableWindow = [];
-      for (let p = 0; p < periodsPerDay; p++) {
-        if (!unavailableSet.has(p)) availableWindow.push(p);
-      }
+      // Specific free slots for Both PG & UG teachers
 
-      let selectedFree = [];
-      for (let i = 0; i < userFreeCount && availableWindow.length > 0; i++) {
-        let chosenIndex = (tIdx * 5 + dIdx * 3 + i * 7) % availableWindow.length;
-        let slot = availableWindow[chosenIndex];
-        while (selectedFree.includes(slot)) {
-          chosenIndex = (chosenIndex + 1) % availableWindow.length;
-          slot = availableWindow[chosenIndex];
+      const specificFree = (
+        teacherSpecificFreeSlots[teacher]?.[day] || []
+      )
+        .map(Number)
+        .filter(
+          p =>
+            Number.isInteger(p) &&
+            p >= 0 &&
+            p < periodCount
+        );
+
+      if (
+        tCat === 'Both PG & UG' &&
+        specificFree.length > 0
+      ) {
+        for (let p = 0; p < periodCount; p++) {
+          if (!specificFree.includes(p)) {
+            unavailable.add(p);
+          }
         }
-        selectedFree.push(slot);
       }
 
-      unavailableSet.forEach(s => teacherOffSlots[teacher][dayName].add(s));
-      selectedFree.forEach(s => teacherOffSlots[teacher][dayName].add(s));
+      const availableWindow = [];
+
+      for (let p = 0; p < periodCount; p++) {
+        if (!unavailable.has(p)) {
+          availableWindow.push(p);
+        }
+      }
+
+      // Free-period distribution
+
+      const selectedFree = [];
+
+      const effectiveFreeCount =
+        tCat === 'Both PG & UG' && specificFree.length > 0
+          ? 0
+          : userFreeCount;
+
+      for (
+        let i = 0;
+        i < effectiveFreeCount &&
+        selectedFree.length < availableWindow.length;
+        i++
+      ) {
+
+        if (availableWindow.length === 0) break;
+
+        const chosenIndex =
+          (tIdx * 5 + dIdx * 3 + i * 7) %
+          availableWindow.length;
+
+        const slot = availableWindow[chosenIndex];
+
+        if (!selectedFree.includes(slot)) {
+          selectedFree.push(slot);
+        }
+      }
+
+      teacherOffSlots[teacher][day] = new Set([
+        ...unavailable,
+        ...selectedFree
+      ]);
+
     });
   });
 
-  const isTeacherAvailable = (teacher, day, periodIndex) => {
-    const avail = teacherAvailability[teacher] || { type: 'Full-Time', days: {}, timeSlot: 'Full-Day' };
-    if (avail.type === 'Part-Time') {
-      if (avail.days && avail.days[day] === false) return false;
-      if (avail.timeSlot === 'Forenoon' && periodIndex >= 4) return false;
-      if (avail.timeSlot === 'Afternoon' && periodIndex < 4) return false;
+  // --------------------------------------------------
+  // 4. TEACHER AVAILABILITY CHECK
+  // --------------------------------------------------
+
+  const isTeacherAvailable = (
+    teacher,
+    day,
+    periodIndex
+  ) => {
+
+    const availability = teacherAvailability[teacher] || {
+      type: 'Full-Time',
+      days: {},
+      timeSlot: 'Full-Day'
+    };
+
+    if (
+      availability.days &&
+      availability.days[day] === false
+    ) {
+      return false;
     }
+
+    if (availability.type === 'Part-Time') {
+
+      if (
+        availability.timeSlot === 'Forenoon' &&
+        periodIndex >= halfLimit
+      ) {
+        return false;
+      }
+
+      if (
+        availability.timeSlot === 'Afternoon' &&
+        periodIndex < halfLimit
+      ) {
+        return false;
+      }
+    }
+
     return true;
   };
 
-  const getAssignedTeacherForClassSubject = (className, subject) => {
-    for (const [tName, classMap] of Object.entries(assignments)) {
-      if (classMap[className] && classMap[className].includes(subject)) {
-        return tName;
-      }
-    }
-    return null;
+  // --------------------------------------------------
+  // 5. CLASS CATEGORY CHECK
+  // --------------------------------------------------
+
+  const isHigherSecondaryClass = className => {
+
+    const normalized = String(className).toLowerCase();
+
+    return /(^|\D)(11|12)(\D|$)/.test(normalized);
   };
 
-  const totalClassSlots = DAYS_LIST.length * periodsPerDay;
-  const classSubjectWeeklyTargets = {};
+  const teacherCanTeachClass = (
+    teacher,
+    className
+  ) => {
+
+    const category = teacherCategory[teacher] || 'UG Only';
+
+    if (
+      category === 'PG Only' &&
+      !isHigherSecondaryClass(className)
+    ) {
+      return false;
+    }
+
+    if (
+      category === 'UG Only' &&
+      isHigherSecondaryClass(className)
+    ) {
+      return false;
+    }
+
+    return true;
+  };
+
+  // --------------------------------------------------
+  // 6. SUBJECT TIME SLOT RULES
+  // --------------------------------------------------
+
+  const subjectAllowedAtPeriod = (
+    subject,
+    periodIndex
+  ) => {
+
+    const rule = subjectTimeSlotRules[subject] || 'Any Time';
+
+    if (
+      rule === 'Morning Only' &&
+      periodIndex >= halfLimit
+    ) {
+      return false;
+    }
+
+    if (
+      rule === 'Afternoon Only' &&
+      periodIndex < halfLimit
+    ) {
+      return false;
+    }
+
+    return true;
+  };
+
+  // --------------------------------------------------
+  // 7. GET ASSIGNED TEACHERS FOR EACH SUBJECT
+  // --------------------------------------------------
+
+  const getTeachersForClassSubject = (
+    className,
+    subject
+  ) => {
+
+    return tList.filter(teacher =>
+      Array.isArray(assignments[teacher]?.[className]) &&
+      assignments[teacher][className].includes(subject)
+    );
+  };
+
+  // --------------------------------------------------
+  // 8. IDENTIFY ALL ACTIVE SUBJECTS FOR EACH CLASS
+  // --------------------------------------------------
+
+  const activeSubjectsByClass = {};
 
   cList.forEach(className => {
-    classSubjectWeeklyTargets[className] = {};
-    let activeClassSubjects = [];
 
-    sList.forEach(sub => {
-      const t = getAssignedTeacherForClassSubject(className, sub);
-      if (t) {
-        const userPriority = Number(subjectPriorities[sub]) || 2;
-        activeClassSubjects.push({ subject: sub, priority: userPriority });
-      }
-    });
+    activeSubjectsByClass[className] = sList.filter(
+      subject =>
+        getTeachersForClassSubject(
+          className,
+          subject
+        ).length > 0
+    );
 
-    if (activeClassSubjects.length === 0) {
-      activeClassSubjects = sList.map(sub => ({ subject: sub, priority: Number(subjectPriorities[sub]) || 2 }));
+  });
+
+  // --------------------------------------------------
+  // 9. INITIALIZE WEEKLY AND DAILY COUNTS
+  // --------------------------------------------------
+
+  const weeklyCounts = {};
+  const dailyCounts = {};
+  const dailyLoads = {};
+  const targets = {};
+
+  cList.forEach(className => {
+
+    weeklyCounts[className] = Object.fromEntries(
+      sList.map(s => [s, 0])
+    );
+
+    dailyCounts[className] = Object.fromEntries(
+      DAYS_LIST.map(day => [
+        day,
+        Object.fromEntries(
+          sList.map(s => [s, 0])
+        )
+      ])
+    );
+
+    targets[className] = calculateTargets(
+      activeSubjectsByClass[className],
+      periodCount * DAYS_LIST.length,
+      subjectPriorities
+    );
+
+  });
+
+  tList.forEach(teacher => {
+
+    dailyLoads[teacher] = Object.fromEntries(
+      DAYS_LIST.map(day => [day, 0])
+    );
+
+  });
+
+  // --------------------------------------------------
+  // 10. VALID CANDIDATE GENERATION
+  // --------------------------------------------------
+
+  const getCandidates = (
+    className,
+    subject,
+    day,
+    period
+  ) => {
+
+    if (
+      cTimetables[className][day][period] !== null
+    ) {
+      return [];
     }
 
-    const totalPriorityWeight = activeClassSubjects.reduce((sum, item) => sum + item.priority, 0);
-    let allocatedSum = 0;
-    let subjectTargets = [];
-
-    activeClassSubjects.forEach((item) => {
-      let exactTarget = (item.priority / totalPriorityWeight) * totalClassSlots;
-      let baseTarget = Math.max(1, Math.floor(exactTarget));
-      subjectTargets.push({
-        subject: item.subject,
-        baseTarget,
-        remainder: exactTarget - Math.floor(exactTarget)
-      });
-      allocatedSum += baseTarget;
-    });
-
-    let diff = totalClassSlots - allocatedSum;
-    if (diff > 0) {
-      subjectTargets.sort((a, b) => b.remainder - a.remainder);
-      for (let i = 0; i < diff; i++) {
-        subjectTargets[i % subjectTargets.length].baseTarget += 1;
-      }
-    } else if (diff < 0) {
-      subjectTargets.sort((a, b) => a.baseTarget - b.baseTarget);
-      for (let i = 0; i < Math.abs(diff); i++) {
-        if (subjectTargets[i].baseTarget > 1) {
-          subjectTargets[i].baseTarget -= 1;
-        }
-      }
+    if (
+      !subjectAllowedAtPeriod(subject, period)
+    ) {
+      return [];
     }
 
-    subjectTargets.forEach(st => {
-      classSubjectWeeklyTargets[className][st.subject] = st.baseTarget;
-    });
-  });
+    return getTeachersForClassSubject(
+      className,
+      subject
+    ).filter(teacher =>
 
-  const classSubjectWeeklyCounts = {};
-  const classSubjectDailyCounts = {};
-  const teacherDailyLoad = {};
-  const lastAssignedSubjectPerClass = {};
+      isTeacherAvailable(teacher, day, period) &&
 
-  cList.forEach(c => {
-    classSubjectWeeklyCounts[c] = {};
-    classSubjectDailyCounts[c] = {};
-    lastAssignedSubjectPerClass[c] = { subject: null, count: 0 };
-    DAYS_LIST.forEach(d => {
-      classSubjectDailyCounts[c][d] = {};
-      sList.forEach(s => { 
-        classSubjectWeeklyCounts[c][s] = 0; 
-        classSubjectDailyCounts[c][d][s] = 0; 
+      !teacherOffSlots[teacher][day].has(period) &&
+
+      tTimetables[teacher][day][period] === null &&
+
+      teacherCanTeachClass(teacher, className)
+
+    );
+  };
+
+  // --------------------------------------------------
+  // 11. PLACE LESSON IN BOTH TIMETABLES
+  // --------------------------------------------------
+
+  const placeLesson = (
+    className,
+    subject,
+    teacher,
+    day,
+    period
+  ) => {
+
+    // Update class timetable
+
+    cTimetables[className][day][period] = {
+      subject,
+      teacher
+    };
+
+    // Update teacher timetable simultaneously
+
+    tTimetables[teacher][day][period] = {
+      subject,
+      class: className
+    };
+
+    weeklyCounts[className][subject] += 1;
+
+    dailyCounts[className][day][subject] += 1;
+
+    dailyLoads[teacher][day] += 1;
+  };
+
+  // --------------------------------------------------
+  // 12. REQUIRED SUBJECT COVERAGE
+  // --------------------------------------------------
+
+  const requiredPairs = [];
+
+  cList.forEach(className => {
+
+    activeSubjectsByClass[className].forEach(subject => {
+
+      requiredPairs.push({
+        className,
+        subject
       });
+
     });
+
   });
 
-  tList.forEach(t => {
-    teacherDailyLoad[t] = {};
-    DAYS_LIST.forEach(d => { teacherDailyLoad[t][d] = 0; });
-  });
+  // --------------------------------------------------
+  // 13. UNDO LESSON FOR BACKTRACKING
+  // --------------------------------------------------
 
-  let unassignedSlotsCount = 0;
+  const undoLesson = (
+    className,
+    subject,
+    teacher,
+    day,
+    period
+  ) => {
 
-  DAYS_LIST.forEach((dayName, dIdx) => {
-    for (let p = 0; p < periodsPerDay; p++) {
-      const rotatedClasses = [...cList.slice((dIdx + p) % cList.length), ...cList.slice(0, (dIdx + p) % cList.length)];
+    cTimetables[className][day][period] = null;
 
-      rotatedClasses.forEach(className => {
-        if (cTimetables[className][dayName][p] !== null) return;
+    tTimetables[teacher][day][period] = null;
 
-        let possibleMatches = [];
-        tList.forEach(teacher => {
-          if (!isTeacherAvailable(teacher, dayName, p)) return;
-          if (tTimetables[teacher][dayName][p] !== null) return;
-          if (teacherOffSlots[teacher][dayName].has(p)) return;
+    weeklyCounts[className][subject] -= 1;
 
-          const classSubs = (assignments[teacher] && assignments[teacher][className]) || [];
-          classSubs.forEach(sub => {
-            const priority = subjectPriorities[sub] || 2;
-            const weeklyTarget = classSubjectWeeklyTargets[className][sub] || 5;
-            const weeklyCount = classSubjectWeeklyCounts[className][sub] || 0;
-            const dailyCount = classSubjectDailyCounts[className][dayName][sub] || 0;
+    dailyCounts[className][day][subject] -= 1;
 
-            const lastSubInfo = lastAssignedSubjectPerClass[className];
-            if (lastSubInfo.subject === sub && lastSubInfo.count >= 2) return;
-            if (weeklyCount >= weeklyTarget) return;
-            if (dailyCount >= 2) return;
+    dailyLoads[teacher][day] -= 1;
+  };
 
-            let fairnessPenalty = weeklyCount * 100;
-            let priorityWeight = priority * 200;
-            let dailyPenalty = dailyCount * 50;
-            let score = priorityWeight - fairnessPenalty - dailyPenalty + Math.random() * 10;
+  // --------------------------------------------------
+  // 14. BACKTRACKING SCHEDULING
+  // --------------------------------------------------
 
-            possibleMatches.push({ teacher, subject: sub, priority, score });
+  let coverageSearchNodes = 0;
+
+  const MAX_COVERAGE_SEARCH_NODES = 50000;
+
+  const scheduleCoverage = remainingPairs => {
+
+    if (remainingPairs.length === 0) {
+      return true;
+    }
+
+    if (
+      ++coverageSearchNodes >
+      MAX_COVERAGE_SEARCH_NODES
+    ) {
+      return false;
+    }
+
+    // Minimum Remaining Values:
+    // Schedule the most difficult subject first.
+
+    let selectedIndex = -1;
+    let selectedOptions = null;
+
+    remainingPairs.forEach((pair, index) => {
+
+      const options = [];
+
+      DAYS_LIST.forEach((day, dayIndex) => {
+
+        for (
+          let period = 0;
+          period < periodCount;
+          period++
+        ) {
+
+          getCandidates(
+            pair.className,
+            pair.subject,
+            day,
+            period
+          ).forEach(teacher => {
+
+            options.push({
+              teacher,
+              day,
+              dayIndex,
+              period
+            });
+
           });
+
+        }
+
+      });
+
+      if (
+        selectedOptions === null ||
+        options.length < selectedOptions.length
+      ) {
+
+        selectedIndex = index;
+        selectedOptions = options;
+
+      }
+
+    });
+
+    if (
+      !selectedOptions ||
+      selectedOptions.length === 0
+    ) {
+      return false;
+    }
+
+    const pair = remainingPairs[selectedIndex];
+
+    const nextPairs = remainingPairs.filter(
+      (_, index) => index !== selectedIndex
+    );
+
+    // Prefer teachers with lower daily workload.
+
+    selectedOptions.sort((a, b) =>
+
+      dailyLoads[a.teacher][a.day] -
+      dailyLoads[b.teacher][b.day] ||
+
+      a.dayIndex - b.dayIndex ||
+
+      a.period - b.period ||
+
+      tList.indexOf(a.teacher) -
+      tList.indexOf(b.teacher)
+
+    );
+
+    for (const option of selectedOptions) {
+
+      placeLesson(
+        pair.className,
+        pair.subject,
+        option.teacher,
+        option.day,
+        option.period
+      );
+
+      if (scheduleCoverage(nextPairs)) {
+        return true;
+      }
+
+      undoLesson(
+        pair.className,
+        pair.subject,
+        option.teacher,
+        option.day,
+        option.period
+      );
+
+      if (
+        coverageSearchNodes >
+        MAX_COVERAGE_SEARCH_NODES
+      ) {
+        break;
+      }
+
+    }
+
+    return false;
+  };
+
+  // Run coverage scheduling.
+
+  const allSubjectsCovered =
+    scheduleCoverage(requiredPairs);
+
+  // --------------------------------------------------
+  // 15. BEST EFFORT COVERAGE FALLBACK
+  // --------------------------------------------------
+
+  // If the search budget is reached or no complete
+  // solution exists, try scheduling remaining subjects.
+  // All hard constraints are still respected.
+
+  if (!allSubjectsCovered) {
+
+    const remaining = requiredPairs.filter(pair =>
+
+      weeklyCounts[pair.className][pair.subject] === 0
+
+    );
+
+    while (remaining.length) {
+
+      let bestPairIndex = -1;
+      let bestOptions = null;
+
+      remaining.forEach((pair, pairIndex) => {
+
+        const options = [];
+
+        DAYS_LIST.forEach((day, dayIndex) => {
+
+          for (
+            let period = 0;
+            period < periodCount;
+            period++
+          ) {
+
+            getCandidates(
+              pair.className,
+              pair.subject,
+              day,
+              period
+            ).forEach(teacher => {
+
+              options.push({
+                teacher,
+                day,
+                dayIndex,
+                period
+              });
+
+            });
+
+          }
+
         });
 
-        if (possibleMatches.length > 0) {
-          possibleMatches.sort((a, b) => b.score - a.score);
-          const best = possibleMatches[0];
-          
-          cTimetables[className][dayName][p] = { subject: best.subject, teacher: best.teacher };
-          tTimetables[best.teacher][dayName][p] = { subject: best.subject, class: className };
-          
-          classSubjectWeeklyCounts[className][best.subject] = (classSubjectWeeklyCounts[className][best.subject] || 0) + 1;
-          classSubjectDailyCounts[className][dayName][best.subject] = (classSubjectDailyCounts[className][dayName][best.subject] || 0) + 1;
-          teacherDailyLoad[best.teacher][dayName] = (teacherDailyLoad[best.teacher][dayName] || 0) + 1;
+        if (
+          bestOptions === null ||
+          options.length < bestOptions.length
+        ) {
 
-          if (lastAssignedSubjectPerClass[className].subject === best.subject) {
-            lastAssignedSubjectPerClass[className].count += 1;
-          } else {
-            lastAssignedSubjectPerClass[className] = { subject: best.subject, count: 1 };
+          bestOptions = options;
+          bestPairIndex = pairIndex;
+
+        }
+
+      });
+
+      const pair = remaining.splice(
+        bestPairIndex,
+        1
+      )[0];
+
+      if (
+        !bestOptions ||
+        bestOptions.length === 0
+      ) {
+        continue;
+      }
+
+      bestOptions.sort((a, b) =>
+
+        dailyLoads[a.teacher][a.day] -
+        dailyLoads[b.teacher][b.day] ||
+
+        a.dayIndex - b.dayIndex ||
+
+        a.period - b.period
+
+      );
+
+      const chosen = bestOptions[0];
+
+      placeLesson(
+        pair.className,
+        pair.subject,
+        chosen.teacher,
+        chosen.day,
+        chosen.period
+      );
+
+    }
+
+  }
+
+  // --------------------------------------------------
+  // 16. FILL REMAINING CLASS PERIODS
+  // --------------------------------------------------
+
+  DAYS_LIST.forEach(day => {
+
+    for (
+      let period = 0;
+      period < periodCount;
+      period++
+    ) {
+
+      const rotation =
+        (DAYS_LIST.indexOf(day) + period) %
+        cList.length;
+
+      const rotatedClasses = [
+        ...cList.slice(rotation),
+        ...cList.slice(0, rotation)
+      ];
+
+      rotatedClasses.forEach(className => {
+
+        if (
+          cTimetables[className][day][period] !== null
+        ) {
+          return;
+        }
+
+        const candidates = [];
+
+        activeSubjectsByClass[className].forEach(subject => {
+
+          const dailyCount =
+            dailyCounts[className][day][subject] || 0;
+
+          // Maximum 3 periods of the same subject per day.
+
+          if (dailyCount >= 3) {
+            return;
           }
-        } else {
-          let fallbackMatches = [];
-          tList.forEach(teacher => {
-            if (!isTeacherAvailable(teacher, dayName, p)) return;
-            if (tTimetables[teacher][dayName][p] !== null) return;
-            if (teacherOffSlots[teacher][dayName].has(p)) return;
-            const classSubs = (assignments[teacher] && assignments[teacher][className]) || [];
-            classSubs.forEach(sub => {
-              const priority = subjectPriorities[sub] || 2;
-              const weeklyCount = classSubjectWeeklyCounts[className][sub] || 0;
-              const weeklyTarget = classSubjectWeeklyTargets[className][sub] || 5;
-              fallbackMatches.push({ teacher, subject: sub, priority, weeklyCount, weeklyTarget });
+
+          if (
+            weeklyCounts[className][subject] >=
+            (targets[className][subject] || 0)
+          ) {
+            return;
+          }
+
+          getCandidates(
+            className,
+            subject,
+            day,
+            period
+          ).forEach(teacher => {
+
+            const priority = positivePriority(
+              subjectPriorities[subject]
+            );
+
+            const target =
+              targets[className][subject] || 0;
+
+            const count =
+              weeklyCounts[className][subject] || 0;
+
+            const deficit = Math.max(
+              0,
+              target - count
+            );
+
+            const score =
+              priority * 150 +
+              deficit * 800 -
+              count * 50 -
+              dailyCount * 30 -
+              dailyLoads[teacher][day] * 5;
+
+            candidates.push({
+              teacher,
+              subject,
+              score
             });
+
           });
 
-          if (fallbackMatches.length > 0) {
-            fallbackMatches.sort((a, b) => {
-              if (b.priority !== a.priority) return b.priority - a.priority;
-              return (a.weeklyCount - a.weeklyTarget) - (b.weeklyCount - b.weeklyTarget);
-            });
-            const bestFB = fallbackMatches[0];
-            cTimetables[className][dayName][p] = { subject: bestFB.subject, teacher: bestFB.teacher };
-            tTimetables[bestFB.teacher][dayName][p] = { subject: bestFB.subject, class: className };
-            classSubjectWeeklyCounts[className][bestFB.subject] = (classSubjectWeeklyCounts[className][bestFB.subject] || 0) + 1;
-            classSubjectDailyCounts[className][dayName][bestFB.subject] = (classSubjectDailyCounts[className][dayName][bestFB.subject] || 0) + 1;
-            teacherDailyLoad[bestFB.teacher][dayName] = (teacherDailyLoad[bestFB.teacher][dayName] || 0) + 1;
-            lastAssignedSubjectPerClass[className] = { subject: bestFB.subject, count: 1 };
-          } else {
-            unassignedSlotsCount++;
-          }
+        });
+
+        if (!candidates.length) {
+          return;
         }
+
+        candidates.sort((a, b) =>
+
+          b.score - a.score ||
+
+          tList.indexOf(a.teacher) -
+          tList.indexOf(b.teacher)
+
+        );
+
+        const best = candidates[0];
+
+        placeLesson(
+          className,
+          best.subject,
+          best.teacher,
+          day,
+          period
+        );
+
       });
+
     }
+
   });
 
-  // End of generateTimetableData function-ku munnadi, return statement eppadi irukanum:
+// --------------------------------------------------
+// 16B. FILL REMAINING EMPTY SLOTS
+// --------------------------------------------------
+
+// Weekly targets are preferences, not hard restrictions.
+// All other teacher, subject, and daily constraints remain active.
+
+DAYS_LIST.forEach(day => {
+
+  for (let period = 0; period < periodCount; period++) {
+
+    const rotation =
+      (DAYS_LIST.indexOf(day) + period) % cList.length;
+
+    const rotatedClasses = [
+      ...cList.slice(rotation),
+      ...cList.slice(0, rotation)
+    ];
+
+    rotatedClasses.forEach(className => {
+
+      // Skip already filled slots
+      if (cTimetables[className][day][period] !== null) {
+        return;
+      }
+
+      let fallbackCandidates = [];
+
+      // Consider every assigned subject, even if its
+      // weekly target has already been reached.
+      activeSubjectsByClass[className].forEach(subject => {
+
+        const dailyCount =
+          dailyCounts[className][day][subject] || 0;
+
+        // Preserve the existing maximum daily limit.
+        if (dailyCount >= 3) {
+          return;
+        }
+
+        const teachers = getCandidates(
+          className,
+          subject,
+          day,
+          period
+        );
+
+        teachers.forEach(teacher => {
+
+          const priority = positivePriority(
+            subjectPriorities[subject]
+          );
+
+          const weeklyCount =
+            weeklyCounts[className][subject] || 0;
+
+          const score =
+            priority * 150 -
+            weeklyCount * 50 -
+            dailyCount * 30 -
+            dailyLoads[teacher][day] * 5;
+
+          fallbackCandidates.push({
+            teacher,
+            subject,
+            score
+          });
+
+        });
+
+      });
+
+      // No valid teacher available: keep the slot empty.
+      if (fallbackCandidates.length === 0) {
+        return;
+      }
+
+      fallbackCandidates.sort(
+        (a, b) => b.score - a.score
+      );
+
+      const best = fallbackCandidates[0];
+
+      // Update both timetables simultaneously.
+      placeLesson(
+        className,
+        best.subject,
+        best.teacher,
+        day,
+        period
+      );
+
+    });
+
+  }
+
+});
+
+
+  // --------------------------------------------------
+  // 17. CHECK MISSING SUBJECTS
+  // --------------------------------------------------
+
+  const missingSubjectsByClass = {};
+
+  cList.forEach(className => {
+
+    missingSubjectsByClass[className] =
+      activeSubjectsByClass[className].filter(
+        subject =>
+          weeklyCounts[className][subject] === 0
+      );
+
+  });
+
+  // --------------------------------------------------
+  // 18. CHECK UNASSIGNED SLOTS
+  // --------------------------------------------------
+
+  const unassignedSlots = [];
+
+  cList.forEach(className => {
+
+    DAYS_LIST.forEach(day => {
+
+      cTimetables[className][day].forEach(
+        (lesson, period) => {
+
+          if (lesson === null) {
+
+            unassignedSlots.push({
+              class: className,
+              day,
+              period: period + 1
+            });
+
+          }
+
+        }
+      );
+
+    });
+
+  });
+
+  const unassignedSlotsCount =
+    unassignedSlots.length;
+
+  // --------------------------------------------------
+  // 19. RETURN FINAL TIMETABLE DATA
+  // --------------------------------------------------
+
   return {
+
     classTimetables: cTimetables,
+
     teacherTimetables: tTimetables,
-    unassignedSlotsCount
+
+    unassignedSlotsCount,
+
+    missingSubjectsByClass,
+
+    unassignedSlots,
+
+    weeklySubjectCounts: weeklyCounts,
+
+    weeklySubjectTargets: targets,
+
+    coverageSearchCompleted: allSubjectsCovered,
+
+    classesWithoutSubjectAssignments: cList.filter(
+      className =>
+        activeSubjectsByClass[className].length === 0
+    )
+
   };
+
 };
+
+// --------------------------------------------------
+// HELPER FUNCTIONS
+// --------------------------------------------------
+
+function splitInput(value) {
+
+  return String(value || '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
+
+}
+
+// --------------------------------------------------
+// SUBJECT PRIORITY
+// --------------------------------------------------
+
+function positivePriority(value) {
+
+  const number = Number(value);
+
+  return Number.isFinite(number) && number > 0
+    ? number
+    : 2;
+
+}
+
+// --------------------------------------------------
+// WEEKLY SUBJECT TARGET CALCULATION
+// --------------------------------------------------
+
+function calculateTargets(
+  subjects,
+  totalSlots,
+  priorities
+) {
+
+  const result = {};
+
+  if (
+    !subjects.length ||
+    totalSlots <= 0
+  ) {
+    return result;
+  }
+
+  // Guarantee at least one target slot
+  // for every assigned subject.
+
+  subjects.forEach(subject => {
+
+    result[subject] = 1;
+
+  });
+
+  // Distribute remaining periods according to priority.
+
+  let remaining = Math.max(
+    0,
+    totalSlots - subjects.length
+  );
+
+  const totalWeight = subjects.reduce(
+    (sum, subject) =>
+      sum + positivePriority(priorities[subject]),
+    0
+  );
+
+  const fractions = subjects.map(subject => {
+
+    const exact =
+      remaining *
+      positivePriority(priorities[subject]) /
+      totalWeight;
+
+    const whole = Math.floor(exact);
+
+    result[subject] += whole;
+
+    return {
+      subject,
+      remainder: exact - whole
+    };
+
+  });
+
+  let allocated = fractions.reduce(
+    (sum, item) => {
+
+      const exact =
+        remaining *
+        positivePriority(priorities[item.subject]) /
+        totalWeight;
+
+      return sum + Math.floor(exact);
+
+    },
+    0
+  );
+
+  // Largest remainder allocation.
+
+  fractions.sort(
+    (a, b) => b.remainder - a.remainder
+  );
+
+  for (
+    let i = 0;
+    i < remaining - allocated;
+    i++
+  ) {
+
+    result[
+      fractions[i % fractions.length].subject
+    ] += 1;
+
+  }
+
+  return result;
+
+}
