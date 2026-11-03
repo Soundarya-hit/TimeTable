@@ -19,8 +19,8 @@ describe('TimetableDashboard Component', () => {
     const teachersInput = screen.getByDisplayValue(/Teacher A, Teacher B/i);
     fireEvent.change(teachersInput, { target: { value: '' } });
     
-    // Click proceed button using its exact name
-    const proceedButton = screen.getByRole('button', { name: /Next: Teacher Subject Assignments/i });
+    // Click proceed button using its correct updated name ("Next: Advanced Scheduling Rules ➔")
+    const proceedButton = screen.getByRole('button', { name: /Next: Advanced Scheduling Rules/i });
     fireEvent.click(proceedButton);
     
     // Check validation error message

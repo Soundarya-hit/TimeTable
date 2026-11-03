@@ -1,4 +1,4 @@
-export const DAYS_LIST = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+/*export const DAYS_LIST = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
 export const generateTimetableDataUpload = ({
   teachersInput, classesInput, subjectsInput, periodsPerDay,
@@ -156,4 +156,4 @@ export const generateTimetableDataUpload = ({
   });
 
   return { classTimetables: cTimetables, teacherTimetables: tTimetables, unassignedSlotsCount };
-};
+}; */

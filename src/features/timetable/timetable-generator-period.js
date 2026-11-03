@@ -10,13 +10,20 @@ export function generatePeriodTimetableData({
   teacherTypes,
   teacherFreeCounts,
   teacherAvailability,
-  assignments
+  assignments,
+  // Advanced Constraints Parameters
+  teacherCategory = {},
+  teacherSpecificFreeSlots = {},
+  partTimeDayConfig = {},
+  subjectTimeSlotRules = {}
 }) {
   const classes = classesInput.split(',').map(c => c.trim()).filter(Boolean);
   const teachers = teachersInput.split(',').map(t => t.trim()).filter(Boolean);
   const subjects = subjectsInput.split(',').map(s => s.trim()).filter(Boolean);
 
-  // Initialize Class Timetables: Class -> Day -> Array of periods (size periodsPerDay)
+  const halfPeriods = Math.ceil(periodsPerDay / 2);
+
+  // Initialize Class Timetables
   const classTimetables = {};
   classes.forEach(cName => {
     classTimetables[cName] = {};
@@ -25,7 +32,7 @@ export function generatePeriodTimetableData({
     });
   });
 
-  // Initialize Teacher Timetables: Shared globally to prevent double-booking
+  // Initialize Teacher Timetables
   const teacherTimetables = {};
   teachers.forEach(tName => {
     teacherTimetables[tName] = {};
@@ -34,57 +41,118 @@ export function generatePeriodTimetableData({
     });
   });
 
-  // Helper: Check Teacher Availability (Rule 1)
-  const isTeacherAvailable = (tName, dayName, periodIndex) => {
-    // 1. Check if teacher is already assigned in another class for this period
+  // Helper: Check if a class is Higher Secondary (PG: 11, 12) or Middle/High School (UG: 6-10)
+  const isHigherSecondaryClass = (cName) => {
+    const match = cName.match(/\d+/);
+    if (match) {
+      const num = parseInt(match[0], 10);
+      return num >= 11;
+    }
+    const lower = cName.toLowerCase();
+    return lower.includes('11') || lower.includes('12') || lower.includes('pg') || lower.includes('higher');
+  };
+
+  // Helper: Teacher Eligibility by Designation
+  const isTeacherEligibleForClass = (tName, className) => {
+    const cat = teacherCategory[tName] || 'UG Only';
+    const isHigher = isHigherSecondaryClass(className);
+
+    if (cat === 'UG Only' && isHigher) return false;
+    if (cat === 'PG Only' && !isHigher) return false;
+    return true;
+  };
+
+  // Helper: Teacher Availability & Free Slot Logic Check
+  const isTeacherAvailable = (tName, dayName, periodIndex, subjectName) => {
+    // 1. Double booking check across classes
     if (teacherTimetables[tName]?.[dayName]?.[periodIndex] !== null) return false;
 
-    // 2. Check Part-Time constraints
-    const tType = teacherTypes[tName] || 'Full-Time';
-    const halfPeriods = Math.ceil(periodsPerDay / 2);
-    if (tType === 'Part-Time First Half' && periodIndex >= halfPeriods) return false;
-    if (tType === 'Part-Time Second Half' && periodIndex < halfPeriods) return false;
+    // 2. Subject Time Slot Rules Check (Morning Only / Afternoon Only)
+    const subRule = subjectTimeSlotRules[subjectName] || 'Any Time';
+    if (subRule === 'Morning Only' && periodIndex >= halfPeriods) return false;
+    if (subRule === 'Afternoon Only' && periodIndex < halfPeriods) return false;
 
-    // 3. Strict Teacher Free Periods per day
-    const freeCount = teacherFreeCounts[tName] !== undefined ? Number(teacherFreeCounts[tName]) : 1;
-    const maxTeachingPeriods = periodsPerDay - freeCount;
+    // 3. Both PG & UG vs Specific Free Slot Handling
+    const cat = teacherCategory[tName] || 'UG Only';
+    const specificFreeDays = teacherSpecificFreeSlots[tName] || {};
+    const configuredSlotsOnDay = specificFreeDays[dayName] || [];
 
-    let currentTeachingCount = 0;
-    for (let p = 0; p < periodsPerDay; p++) {
-      if (teacherTimetables[tName][dayName][p] !== null) {
-        currentTeachingCount++;
+    if (cat === 'Both PG & UG') {
+      // RULE: Both PG & UG teachers MUST ONLY be assigned in the periods marked as FREE by user
+      if (!configuredSlotsOnDay.includes(periodIndex)) {
+        return false;
+      }
+    } else {
+      // For standard UG Only or PG Only, marked slots are restricted free periods
+      if (configuredSlotsOnDay.includes(periodIndex)) {
+        return false;
       }
     }
 
-    if (currentTeachingCount >= maxTeachingPeriods) {
-      return false;
+    // 4. Part-Time Specific Day Shift Config Check
+    const ptConfig = partTimeDayConfig[tName] || {};
+    const dayShift = ptConfig[dayName] || 'Full Day';
+
+    if (dayShift === 'Off Day') return false;
+    if (dayShift === 'First Half' && periodIndex >= halfPeriods) return false;
+    if (dayShift === 'Second Half' && periodIndex < halfPeriods) return false;
+
+    // Fallback to standard teacher type if no specific day config is set
+    const tType = teacherTypes[tName] || 'Full-Time';
+    if (dayShift === 'Full Day') {
+      if (tType === 'Part-Time First Half' && periodIndex >= halfPeriods) return false;
+      if (tType === 'Part-Time Second Half' && periodIndex < halfPeriods) return false;
+    }
+
+    // 5. Strict Teacher Free Periods per day limit (skip for 'Both PG & UG' as their free slots are explicitly fixed)
+    if (cat !== 'Both PG & UG') {
+      const freeCount = teacherFreeCounts[tName] !== undefined ? Number(teacherFreeCounts[tName]) : 1;
+      const maxTeachingPeriods = periodsPerDay - freeCount;
+
+      let currentTeachingCount = 0;
+      for (let p = 0; p < periodsPerDay; p++) {
+        if (teacherTimetables[tName][dayName][p] !== null) {
+          currentTeachingCount++;
+        }
+      }
+
+      if (currentTeachingCount >= maxTeachingPeriods) return false;
     }
 
     return true;
   };
 
-  // Helper: Get Eligible & Available Teacher for a class-subject slot
+  // Helper: Get Available Teacher sorted by priority (Priority given to 'Both PG & UG' teachers on their designated free slots)
   const getAvailableTeacher = (className, subject, dayName, periodIndex) => {
     let eligibleTeachers = teachers.filter(tName => {
       const classMap = assignments[tName] || {};
-      return (classMap[className] || []).includes(subject);
+      const teachesSubject = (classMap[className] || []).includes(subject);
+      return teachesSubject && isTeacherEligibleForClass(tName, className);
     });
+
+    // Sort to prioritize 'Both PG & UG' teachers who have explicit limited window available
+    eligibleTeachers.sort((a, b) => {
+      const catA = teacherCategory[a] || 'UG Only';
+      const catB = teacherCategory[b] || 'UG Only';
+      if (catA === 'Both PG & UG' && catB !== 'Both PG & UG') return -1;
+      if (catA !== 'Both PG & UG' && catB === 'Both PG & UG') return 1;
+      return 0;
+    });
+
     for (const tName of eligibleTeachers) {
-      if (isTeacherAvailable(tName, dayName, periodIndex)) return tName;
+      if (isTeacherAvailable(tName, dayName, periodIndex, subject)) return tName;
     }
     return null;
   };
 
-  // Helper: Exact Lab Matching (Rule 8)
+  // Helper: Lab Matching
   const getCorrespondingSubjectForLab = (labSubject) => {
     const cleanLabName = labSubject.toLowerCase().replace('lab', '').trim();
     return subjects.find(s => s.toLowerCase().trim() === cleanLabName) || null;
   };
 
-  // Process Class-by-Class with Backtracking / Strict Allocation
+  // Process Class-by-Class Allocation
   classes.forEach(className => {
-
-    // Helper functions for allocation tracking
     const getWeeklyAllocated = (sub) => {
       let count = 0;
       DAYS_LIST.forEach(d => {
@@ -104,7 +172,7 @@ export function generatePeriodTimetableData({
     };
 
     // -------------------------------------------------------------
-    // PHASE 1: ALLOCATE LABS CONTINUOUSLY (Rules 6, 7 & 8)
+    // PHASE 1: LAB PERIODS CONTINUOUS ALLOCATION
     // -------------------------------------------------------------
     const labSubjects = subjects.filter(sub => sub.toLowerCase().includes('lab'));
 
@@ -114,10 +182,8 @@ export function generatePeriodTimetableData({
 
       for (let dayIdx = 0; dayIdx < DAYS_LIST.length && remainingLabPeriods > 0; dayIdx++) {
         const dayName = DAYS_LIST[dayIdx];
-
         if (getDailyAllocated(labSub, dayName) > 0) continue;
 
-        // Try Block Allocation (2 continuous periods if remaining >= 2)
         if (remainingLabPeriods >= 2) {
           let allocatedBlock = false;
           for (let p = 0; p < periodsPerDay - 1; p++) {
@@ -129,7 +195,6 @@ export function generatePeriodTimetableData({
               const t2 = getAvailableTeacher(className, labSub, dayName, p + 1);
 
               if (t1 && t2) {
-                // Assign 2 continuous lab periods
                 classTimetables[className][dayName][p] = { subject: labSub, teacher: t1 };
                 teacherTimetables[t1][dayName][p] = { subject: labSub, class: className };
 
@@ -139,7 +204,7 @@ export function generatePeriodTimetableData({
                 remainingLabPeriods -= 2;
                 allocatedBlock = true;
 
-                // Try pairing with related theory subject in adjacent period (Rule 6)
+                // Pair with corresponding theory subject if available
                 const mainSubject = getCorrespondingSubjectForLab(labSub);
                 if (mainSubject) {
                   const targetMain = subjectPeriodCounts[mainSubject] || 5;
@@ -167,7 +232,7 @@ export function generatePeriodTimetableData({
           if (allocatedBlock) continue;
         }
 
-        // Single Lab Period Allocation (if remaining == 1 or double slot failed)
+        // Single Lab Period Fallback
         if (remainingLabPeriods > 0) {
           for (let p = 0; p < periodsPerDay; p++) {
             if (classTimetables[className][dayName][p] === null) {
@@ -185,108 +250,59 @@ export function generatePeriodTimetableData({
     });
 
     // -------------------------------------------------------------
-    // PHASE 2: REGULAR SUBJECT ALLOCATION (Rules 2, 3, 4 & 5)
+    // PHASE 2: REGULAR SUBJECT ALLOCATION (Strict Subject-Centric Enforcement)
     // -------------------------------------------------------------
-    DAYS_LIST.forEach(dayName => {
-      for (let pIdx = 0; pIdx < periodsPerDay; pIdx++) {
-        if (classTimetables[className][dayName][pIdx] !== null) continue;
+    const regularSubjects = subjects.filter(sub => !sub.toLowerCase().includes('lab'));
 
-        let selectedSubject = null;
-        let selectedTeacher = null;
+    regularSubjects.forEach(sub => {
+      const target = subjectPeriodCounts[sub] !== undefined ? Number(subjectPeriodCounts[sub]) : 5;
+      let allocated = getWeeklyAllocated(sub);
 
-        // Rule 4: Priority for subjects with target >= 5 not yet placed today
-        const highFreqPending = subjects.filter(sub => {
-          if (sub.toLowerCase().includes('lab')) return false;
-          const target = subjectPeriodCounts[sub] !== undefined ? Number(subjectPeriodCounts[sub]) : 5;
-          return (
-            target >= 5 &&
-            getWeeklyAllocated(sub) < target &&
-            getDailyAllocated(sub, dayName) === 0
-          );
-        });
+      // Pass 1: Allocate trying to respect daily spacing and consecutive checks
+      for (let dayIdx = 0; dayIdx < DAYS_LIST.length && allocated < target; dayIdx++) {
+        const dayName = DAYS_LIST[dayIdx];
+        const dailyCount = getDailyAllocated(sub, dayName);
 
-        for (const sub of highFreqPending) {
-          const t = getAvailableTeacher(className, sub, dayName, pIdx);
-          if (t) {
-            selectedSubject = sub;
-            selectedTeacher = t;
-            break;
-          }
-        }
+        if (target < 5 && dailyCount >= 1) continue;
+        if (target >= 5 && dailyCount >= 2) continue;
 
-        // General pending subjects evaluation
-        if (!selectedSubject) {
-          const generalPending = subjects.filter(sub => {
-            if (sub.toLowerCase().includes('lab')) return false;
-            const target = subjectPeriodCounts[sub] !== undefined ? Number(subjectPeriodCounts[sub]) : 5;
-            const weeklyCount = getWeeklyAllocated(sub);
-            const dailyCount = getDailyAllocated(sub, dayName);
-
-            // Rule 2 & 3: Stop if weekly target reached
-            if (weeklyCount >= target) return false;
-
-            // Rule 5: Target < 5 cannot appear more than once a day
-            if (target < 5 && dailyCount >= 1) return false;
-
-            // Avoid consecutive repeat for non-lab subjects
+        for (let pIdx = 0; pIdx < periodsPerDay && allocated < target; pIdx++) {
+          if (classTimetables[className][dayName][pIdx] === null) {
             if (pIdx > 0) {
               const prevSlot = classTimetables[className][dayName][pIdx - 1];
-              if (prevSlot && prevSlot.subject === sub) return false;
+              if (prevSlot && prevSlot.subject === sub) continue;
             }
 
-            return true;
-          });
-
-          for (const sub of generalPending) {
             const t = getAvailableTeacher(className, sub, dayName, pIdx);
             if (t) {
-              selectedSubject = sub;
-              selectedTeacher = t;
+              classTimetables[className][dayName][pIdx] = { subject: sub, teacher: t };
+              teacherTimetables[t][dayName][pIdx] = { subject: sub, class: className };
+              allocated++;
               break;
             }
           }
         }
+      }
 
-        // Fallback: Relax consecutive check if needed while maintaining daily limits
-        if (!selectedSubject) {
-          const fallbackPending = subjects.filter(sub => {
-            if (sub.toLowerCase().includes('lab')) return false;
-            const target = subjectPeriodCounts[sub] !== undefined ? Number(subjectPeriodCounts[sub]) : 5;
-            const weeklyCount = getWeeklyAllocated(sub);
-            const dailyCount = getDailyAllocated(sub, dayName);
-
-            if (weeklyCount >= target) return false;
-            if (target < 5 && dailyCount >= 1) return false;
-
-            return true;
-          });
-
-          for (const sub of fallbackPending) {
-            const t = getAvailableTeacher(className, sub, dayName, pIdx);
-            if (t) {
-              selectedSubject = sub;
-              selectedTeacher = t;
-              break;
+      // Pass 2: Fallback to fill remaining target periods without strict daily/consecutive restrictions if needed
+      if (allocated < target) {
+        for (let dayIdx = 0; dayIdx < DAYS_LIST.length && allocated < target; dayIdx++) {
+          const dayName = DAYS_LIST[dayIdx];
+          for (let pIdx = 0; pIdx < periodsPerDay && allocated < target; pIdx++) {
+            if (classTimetables[className][dayName][pIdx] === null) {
+              const t = getAvailableTeacher(className, sub, dayName, pIdx);
+              if (t) {
+                classTimetables[className][dayName][pIdx] = { subject: sub, teacher: t };
+                teacherTimetables[t][dayName][pIdx] = { subject: sub, class: className };
+                allocated++;
+              }
             }
           }
-        }
-
-        // Assign chosen slot
-        if (selectedSubject && selectedTeacher) {
-          classTimetables[className][dayName][pIdx] = {
-            subject: selectedSubject,
-            teacher: selectedTeacher
-          };
-          teacherTimetables[selectedTeacher][dayName][pIdx] = {
-            subject: selectedSubject,
-            class: className
-          };
         }
       }
     });
   });
 
-  // Calculate total unassigned slots
   let unassignedSlotsCount = 0;
   classes.forEach(cName => {
     DAYS_LIST.forEach(d => {
